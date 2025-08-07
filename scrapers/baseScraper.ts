@@ -84,7 +84,7 @@ async function changeLocation(page: Page, storeKey: string) {
   await waitForTimeout(10000);
 
   const changeLocationBtn = 'button[data-cy="location-tooltip-lv-button"]';
-  const found = await page.$(changeLocationBtn);
+  const found = waitForSelectorWithRetry(page, changeLocationBtn, 5, 5000);
 
   if (!found) {
     console.error("Could not find `Your Store` button");
@@ -115,4 +115,19 @@ async function changeLocation(page: Page, storeKey: string) {
   await page.screenshot({
     path: `screenshots/${storeKey}_store_locator_landing.png`,
   });
+}
+
+async function waitForSelectorWithRetry(
+  page: Page,
+  selector: string,
+  retries = 3,
+  delay = 3000
+) {
+  for (let i = 0; i < retries; i++) {
+    const el = await page.$(selector);
+    if (el) return el;
+    console.warn(`⏳ Retry ${i + 1}: Waiting for ${selector}`);
+    await waitForTimeout(delay);
+  }
+  return null;
 }
