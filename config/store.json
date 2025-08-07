@@ -1,0 +1,17 @@
+{
+  "sfBayArea": {
+    "storeId": "632",
+    "zip": "94103",
+    "location": "1717 Harrison St, San Francisco, CA"
+  },
+  "minneapolis": {
+    "storeId": "281",
+    "zip": "55423",
+    "location": "1000 W 78th St, Minneapolis, MN"
+  },
+  "dallas": {
+    "storeId": "293",
+    "zip": "75231",
+    "location": "9378 N Central Expy, Dallas, TX"
+  }
+}
