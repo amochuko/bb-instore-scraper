@@ -1,11 +1,9 @@
 import fs from "node:fs";
-import path from "node:path";
 import puppeteer from "puppeteer-extra";
 import StealthPlugin from "puppeteer-extra-plugin-stealth";
 
+import { Page } from "puppeteer";
 import stores from "../config/store.json";
-import { writeCsv } from "../utils/logger";
-import { validateMatches } from "../utils/matchVallidator";
 
 puppeteer.use(StealthPlugin());
 
@@ -42,7 +40,6 @@ export async function scrapeStore(
     // 1. Go to BestBuy root
     await page.goto(website, { waitUntil: "domcontentloaded" });
 
-
     const splashSelector = "a.us-link";
     const storeLocatorSelector = 'input[placeholder*="ZIP"]';
 
@@ -65,18 +62,57 @@ export async function scrapeStore(
       });
     }
 
-    await waitForTimeout(3000);
+    await waitForTimeout(8000);
     const html = await page.content();
     fs.writeFileSync("debug-after-click.html", html);
     await page.screenshot({
       path: `screenshots/${storeKey}_post_click_debug.png`,
     });
 
-
-
+    await changeLocation(page, storeKey);
   } catch (err) {
     console.error("Unhandled error in scrapeStore", err);
   } finally {
     await browser.close();
   }
+}
+
+////////////////////////////////////////////////////////
+// 2. Open location modal (top nav "Your Store" button)
+////////////////////////////////////////////////////////
+async function changeLocation(page: Page, storeKey: string) {
+  await waitForTimeout(10000);
+
+  const changeLocationBtn = 'button[data-cy="location-tooltip-lv-button"]';
+  const found = await page.$(changeLocationBtn);
+
+  if (!found) {
+    console.error("Could not find `Your Store` button");
+    await page.screenshot({
+      path: `screenshots/${storeKey}_missing_location_button.png`,
+    });
+
+    throw new Error("Location button not found.");
+  }
+
+  await page.click(changeLocationBtn);
+  console.log("Opened store location overlay");
+
+  await page.screenshot({
+    path: `screenshots/${storeKey}_store_overlay.png`,
+  });
+
+  // Click "Find Another Store"
+  const findAnotherStore = "a.find-store-btn";
+  await page.waitForSelector(findAnotherStore, { timeout: 10000 });
+  await Promise.all([
+    page.waitForNavigation({ waitUntil: "domcontentloaded" }),
+    page.click(findAnotherStore),
+  ]);
+
+  console.log("🔁 Navigated to Store Locator");
+
+  await page.screenshot({
+    path: `screenshots/${storeKey}_store_locator_landing.png`,
+  });
 }
