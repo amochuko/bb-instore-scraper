@@ -16,6 +16,15 @@ type Product = {
   image_url?: string;
 };
 
+type StoreData = {
+  storeId: string;
+  zip: string;
+  location: string;
+  city: string;
+  city_code: string;
+  state: string;
+  state_code: string;
+};
 puppeteer.use(StealthPlugin());
 
 const waitForTimeout = (secs: number) =>
@@ -45,40 +54,20 @@ export async function scrapeStore(
     await page.goto(website, { waitUntil: "domcontentloaded" });
 
     const splashSelector = "a.us-link";
-    const storeLocatorSelector = 'input[placeholder*="ZIP"]';
 
     if (await page.$(splashSelector)) {
-      console.log("🌍 Clicking US flag...");
+      console.log("Clicking US flag...");
 
       await page.click(splashSelector);
-
-      // Wait for the splash to disappear or store-locator to appear
-      await Promise.race([
-        page.waitForSelector(storeLocatorSelector, { timeout: 6000 }),
-        page.waitForFunction(() => !document.querySelector("a.us-link"), {
-          timeout: 12000,
-        }),
-      ]);
-
-      console.log("✅ US region selected. Continuing...");
-      await page.screenshot({
-        path: `screenshots/$1{storeKey}_after_splash.png`,
+      const nextPage = "https://www.bestbuy.com/?intl=nosplash";
+      await page.goto(nextPage, {
+        waitUntil: "domcontentloaded",
       });
+    } else {
+      console.error("Option for US region not available.");
     }
 
-    await waitForTimeout(8000);
-    // After clicking the US link and navigation
-    await page.waitForSelector('button[data-cy*="location-tooltip"]', {
-      timeout: 18000,
-    });
-
-    const html = await page.content();
-    fs.writeFileSync("debug-after-click.html", html);
-    await page.screenshot({
-      path: `screenshots/${storeKey}_post_click_debug.png`,
-    });
-
-    // await changeLocation(page, storeKey);
+    await changeLocation(page, storeKey, store);
   } catch (err) {
     console.error("Unhandled error in scrapeStore", err);
   } finally {
@@ -89,11 +78,28 @@ export async function scrapeStore(
 ////////////////////////////////////////////////////////
 // 2. Open location modal (top nav "Your Store" button)
 ////////////////////////////////////////////////////////
-async function changeLocation(page: Page, storeKey: string) {
-  await waitForTimeout(10000);
+async function changeLocation(page: Page, storeKey: string, store: StoreData) {
+  // await page.waitForNavigation({
+  //   waitUntil: "domcontentloaded",
+  // });
+
+  console.log("US region confirmed", page.url());
+
+  await waitForTimeout(5000);
+  // After clicking the US link and navigation
+  const locationTooltipSelector = 'button[data-cy*="location-tooltip"]';
+  // await page.waitForSelector('button[data-cy*="location-tooltip"]', {
+  //   timeout: 5000,
+  // });
+  await waitForSelectorWithRetry(page, locationTooltipSelector, 5, 10000);
 
   const changeLocationBtn = 'button[data-cy="location-tooltip-lv-button"]';
-  const found = waitForSelectorWithRetry(page, changeLocationBtn, 5, 9000);
+  const found = await waitForSelectorWithRetry(
+    page,
+    changeLocationBtn,
+    5,
+    9000
+  );
 
   if (!found) {
     console.error("Could not find `Your Store` button");
@@ -107,9 +113,7 @@ async function changeLocation(page: Page, storeKey: string) {
   await page.click(changeLocationBtn);
   console.log("Opened store location overlay");
 
-  await page.screenshot({
-    path: `screenshots/${storeKey}_store_overlay.png`,
-  });
+  // await takeScreenshot(page, `screenshots/${storeKey}_store_overlay`);
 
   // Click "Find Another Store"
   const findAnotherStore = "a.find-store-btn";
@@ -119,10 +123,85 @@ async function changeLocation(page: Page, storeKey: string) {
     page.click(findAnotherStore),
   ]);
 
-  console.log("🔁 Navigated to Store Locator");
+  // 4. Wait for ZIP input field and submit
+  await searchForStoreLocation(page, storeKey, store);
+}
 
+async function searchForStoreLocation(
+  page: Page,
+  storeKey: string,
+  storeData: StoreData
+) {
+  console.log("🔁 Navigated to Store Locator");
+  await takeScreenshot(page, `${storeKey}_store_locator_landing`);
+
+  const locationInputSelector =
+    'input[aria-label="Enter city and state or zip code"]';
+
+  // const locationInputSelector = 'input[data-cy="store-locator-search-input"]';
+  await page.waitForSelector(locationInputSelector, { timeout: 10000 });
+
+  // Priority: city → state → zip
+  const searchOptions = [
+    storeData.city_code,
+    storeData.state_code,
+    storeData.zip,
+  ].filter(Boolean);
+
+  let searchQuery;
+  for (const option of searchOptions) {
+    // Clear input before typing
+    await page.click(locationInputSelector, { clickCount: 3 });
+    await page.keyboard.press("Backspace");
+
+    console.log(`🔍 Trying location search with: ${option}`);
+    await page.type(locationInputSelector, option, { delay: 100 });
+    await page.keyboard.press("Enter");
+
+    try {
+      await page.waitForSelector(
+        'li[data-cy="LocationCardListItemComponent"]',
+        {
+          timeout: 8000,
+        }
+      );
+      searchQuery = option;
+      console.log(`Search results loaded for ${option}`);
+      break; // Found results, exit loop
+    } catch {
+      console.warn(`⚠️ No results for "${option}", trying next...`);
+
+      await savePageForDebug(page, "debug-page");
+      await takeScreenshot(page, "debug-screenshot");
+
+      console.error(
+        "Failed to find ZIP input. Debug HTML and screenshot saved."
+      );
+    }
+  }
+
+  if (!searchQuery) {
+    throw new Error(
+      `No search results found for city, state, or zip in ${storeKey}`
+    );
+  }
+
+
+  await waitForTimeout(5000);
+  
+  // Wait for the first store card (highlighted one)
+  // await pickFirstStore(page, zip);
+  // await waitForTimeout(2000);
+}
+
+async function savePageForDebug(page: Page, label: string) {
+  const html = await page.content();
+  fs.writeFileSync(`${label}.html`, html);
+}
+
+async function takeScreenshot(page: Page, label: string) {
   await page.screenshot({
-    path: `screenshots/${storeKey}_store_locator_landing.png`,
+    path: `screenshots/${label}.png`,
   });
 }
 
