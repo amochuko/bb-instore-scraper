@@ -30,6 +30,10 @@ export async function scrapeStore(
     headless: process.env.NODE_END === "production",
     slowMo: process.env.NODE_END === "production" ? 0 : 50,
     defaultViewport: null,
+    args: [
+      "--disable-features=Geolocation", // block geolocation API
+      "--deny-permission-prompts", // auto-deny prompts
+    ],
   });
   const page = await browser.newPage();
 
@@ -50,26 +54,31 @@ export async function scrapeStore(
 
       // Wait for the splash to disappear or store-locator to appear
       await Promise.race([
-        page.waitForSelector(storeLocatorSelector, { timeout: 5000 }),
+        page.waitForSelector(storeLocatorSelector, { timeout: 6000 }),
         page.waitForFunction(() => !document.querySelector("a.us-link"), {
-          timeout: 5000,
+          timeout: 12000,
         }),
       ]);
 
       console.log("✅ US region selected. Continuing...");
       await page.screenshot({
-        path: `screenshots/${storeKey}_after_splash.png`,
+        path: `screenshots/$1{storeKey}_after_splash.png`,
       });
     }
 
     await waitForTimeout(8000);
+    // After clicking the US link and navigation
+    await page.waitForSelector('button[data-cy*="location-tooltip"]', {
+      timeout: 18000,
+    });
+
     const html = await page.content();
     fs.writeFileSync("debug-after-click.html", html);
     await page.screenshot({
       path: `screenshots/${storeKey}_post_click_debug.png`,
     });
 
-    await changeLocation(page, storeKey);
+    // await changeLocation(page, storeKey);
   } catch (err) {
     console.error("Unhandled error in scrapeStore", err);
   } finally {
@@ -84,7 +93,7 @@ async function changeLocation(page: Page, storeKey: string) {
   await waitForTimeout(10000);
 
   const changeLocationBtn = 'button[data-cy="location-tooltip-lv-button"]';
-  const found = waitForSelectorWithRetry(page, changeLocationBtn, 5, 5000);
+  const found = waitForSelectorWithRetry(page, changeLocationBtn, 5, 9000);
 
   if (!found) {
     console.error("Could not find `Your Store` button");
@@ -104,7 +113,7 @@ async function changeLocation(page: Page, storeKey: string) {
 
   // Click "Find Another Store"
   const findAnotherStore = "a.find-store-btn";
-  await page.waitForSelector(findAnotherStore, { timeout: 10000 });
+  await page.waitForSelector(findAnotherStore, { timeout: 11000 });
   await Promise.all([
     page.waitForNavigation({ waitUntil: "domcontentloaded" }),
     page.click(findAnotherStore),
