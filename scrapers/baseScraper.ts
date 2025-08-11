@@ -482,17 +482,37 @@ async function traverseForData(
   page: Page,
   itemCategory: string
 ): Promise<Product[]> {
-  await page.waitForSelector(
-    "main li.product-list-item.product-list-item-gridView",
-    { timeout: 15000 }
-  );
+  // Force scroll to load all items on the current page
+  await page.evaluate(async () => {
+    let lastHeight = 0;
+    while (document.body.scrollHeight > lastHeight) {
+      lastHeight = document.body.scrollHeight;
+      window.scrollBy(0, window.innerHeight);
+      await new Promise((r) => setTimeout(r, 500));
+    }
+  });
+
+  // await page.waitForSelector(
+  //   "main li.product-list-item.product-list-item-gridView",
+  //   { timeout: 15000 }
+  // );
 
   const products: Product[] = [];
 
-  // ✅ Get every product <li> inside <main>, regardless of wrappers
+  //  Get every product <li> inside <main>, regardless of wrappers
+  // const items = await page.$$(
+  //   "main li.product-list-item.product-list-item-gridView"
+  // );
+
+  // Get both normal and sponsored <li> items
   const items = await page.$$(
-    "main li.product-list-item.product-list-item-gridView"
+    `
+    main li.product-list-item.product-list-item-gridView,
+    main div.product-list-sponsored-wrapper-grid-view li.product-list-item
+    `
   );
+
+  console.log(`🛒 Found ${items.length} items on this page`);
 
   for (const item of items) {
     try {
@@ -608,7 +628,7 @@ async function scrapeAllPages(
     itemCategory
   )}`;
 
-  console.log(`🔎 Searching category: ${itemCategory} via ${searchQuery}`);
+  console.log(`🔎 Searching category: ${itemCategory}`);
   await safeGoto(page, searchQuery, { waitUntil: "domcontentloaded" });
 
   const allProducts: Product[] = [];
