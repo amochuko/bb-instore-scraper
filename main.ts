@@ -17,5 +17,5 @@ const argv = yargs(hideBin(process.argv)).options({
 
 const { store, category } = argv as any;
 
-// https://www.bestbuy.com/?intl=nosplash 
-scrapeStore("https://www.bestbuy.com/site/store-locator", store, category);
+const website = "https://www.bestbuy.com";
+scrapeStore(website, store, category);
