@@ -1,3 +1,6 @@
 node_modules/
 .Data_Store
 .env
+
+screenshots/
+debug/
