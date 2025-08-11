@@ -2,16 +2,28 @@
   "sfBayArea": {
     "storeId": "632",
     "zip": "94103",
-    "location": "1717 Harrison St, San Francisco, CA"
+    "location": "1717 Harrison St, San Francisco, CA",
+    "city": "San Francisco",
+    "city_code": "San Francisco",
+    "state": "California",
+    "state_code": "CA"
   },
   "minneapolis": {
     "storeId": "281",
     "zip": "55423",
-    "location": "1000 W 78th St, Minneapolis, MN"
+    "location": "1000 W 78th St, Minneapolis, MN",
+    "city": "Minneapolis",
+    "city_code": "Minneapolis",
+    "state": "Minnesota",
+    "state_code": "MN"
   },
   "dallas": {
     "storeId": "293",
     "zip": "75231",
-    "location": "9378 N Central Expy, Dallas, TX"
+    "location": "9378 N Central Expy, Dallas, TX",
+    "city": "Dallas",
+    "city_code": "Dallas",
+    "state": "Texas",
+    "state_code": "TX"
   }
 }
