@@ -2,8 +2,11 @@ import fs from "node:fs";
 import puppeteer from "puppeteer-extra";
 import StealthPlugin from "puppeteer-extra-plugin-stealth";
 
-import { Page } from "puppeteer";
+import path from "node:path";
+import { Browser, Page } from "puppeteer";
 import stores from "../config/store.json";
+import { writeCsv } from "../utils/logger";
+import { validateMatches } from "../utils/matchVallidator";
 
 puppeteer.use(StealthPlugin());
 
@@ -67,7 +70,7 @@ export async function scrapeStore(
       console.error("Option for US region not available.");
     }
 
-    await changeLocation(page, storeKey, store);
+    await changeLocation(page, storeKey, store, website, itemCategory, browser);
   } catch (err) {
     console.error("Unhandled error in scrapeStore", err);
   } finally {
@@ -78,7 +81,14 @@ export async function scrapeStore(
 ////////////////////////////////////////////////////////
 // 2. Open location modal (top nav "Your Store" button)
 ////////////////////////////////////////////////////////
-async function changeLocation(page: Page, storeKey: string, store: StoreData) {
+async function changeLocation(
+  page: Page,
+  storeKey: string,
+  store: StoreData,
+  website: string,
+  itemCategory: string,
+  broswer: Browser
+) {
   // await page.waitForNavigation({
   //   waitUntil: "domcontentloaded",
   // });
@@ -123,14 +133,24 @@ async function changeLocation(page: Page, storeKey: string, store: StoreData) {
     page.click(findAnotherStore),
   ]);
 
-  // 4. Wait for ZIP input field and submit
-  await searchForStoreLocation(page, storeKey, store);
+  // Wait for store location search input field and submit
+  await searchForStoreLocation(
+    page,
+    storeKey,
+    store,
+    website,
+    itemCategory,
+    broswer
+  );
 }
 
 async function searchForStoreLocation(
   page: Page,
   storeKey: string,
-  storeData: StoreData
+  storeData: StoreData,
+  website: string,
+  itemCategory: string,
+  browser: Browser
 ) {
   console.log("🔁 Navigated to Store Locator");
   await takeScreenshot(page, `${storeKey}_store_locator_landing`);
@@ -186,12 +206,9 @@ async function searchForStoreLocation(
     );
   }
 
-
   await waitForTimeout(5000);
-  
-  // Wait for the first store card (highlighted one)
-  // await pickFirstStore(page, zip);
-  // await waitForTimeout(2000);
+  await pickFirstStoreFromList(page, searchQuery);
+  await traverseForData(page, website, itemCategory, storeKey, browser);
 }
 
 async function savePageForDebug(page: Page, label: string) {
@@ -219,3 +236,149 @@ async function waitForSelectorWithRetry(
   }
   return null;
 }
+
+async function pickFirstStoreFromList(page: Page, searchQuery: string) {
+  // Wait for the first store card (highlighted one)
+  await page.waitForSelector("li.store.store-selected", { timeout: 15000 });
+
+  //5. Click on "Make This Your Store"
+  const makeThisYourStoreSelector =
+    "li.store.store-selected .make-this-your-store";
+  await page.waitForSelector(makeThisYourStoreSelector, { timeout: 10000 });
+
+  await page.click(makeThisYourStoreSelector);
+
+  takeScreenshot(page, "make-this-your-store");
+  console.log(`Store set to ${searchQuery}`);
+}
+
+export async function traverseForData(
+  page: Page,
+  website: string,
+  itemCategory: string,
+  storeKey: string,
+  browser: Browser
+) {
+  const categoryUrl = `${website}/site/searchpage.jsp?st=${encodeURIComponent(
+    itemCategory
+  )}`;
+  await page.goto(categoryUrl, { waitUntil: "domcontentloaded" });
+  console.log(`🔎 Searching category: ${itemCategory}`);
+
+  await page.waitForSelector(
+    "li.product-list-item.product-list-item-gridView",
+    { timeout: 15000 }
+  );
+
+  const products: Product[] = [];
+  let pageCount = 0;
+
+  while (products.length < 10000 && pageCount < 30) {
+    console.log(`📄 Scraping page ${pageCount + 1}`);
+
+    const items = await page.$$(
+      "li.product-list-item.product-list-item-gridView"
+    );
+
+    for (const item of items) {
+      try {
+        const availability = await item
+          .$eval(".fulfillment p", (el) => el.textContent?.trim() || "")
+          .catch(() => "");
+
+        if (!availability.toLowerCase().includes("pick up")) continue;
+
+        const name = await item
+          .$eval(
+            ".sku-block-content-title h2.product-title",
+            (el) => el.textContent?.trim() || ""
+          )
+          .catch(() => "");
+
+        let price = await item
+          .$eval(
+            '[data-testid="price-presentational-testId"] #restricted-price',
+            (el) => el.textContent?.trim().replace("$", "") || ""
+          )
+          .catch(() => "");
+
+        const link = await item
+          .$eval(
+            ".sku-block-content-title a.product-list-item-link",
+            (el) => el.getAttribute("href") || ""
+          )
+          .catch(() => "");
+
+        const img = await item
+          .$eval(
+            'img[data-testid="product-image"]',
+            (el) => el.getAttribute("src") || ""
+          )
+          .catch(() => "");
+
+        const brand = await item
+          .$eval(
+            ".sku-block-content-title span.first-title",
+            (el) => el.textContent?.trim() || ""
+          )
+          .catch(() => "");
+
+        const skuMatch = link.match(/skuId=(\d+)/);
+        const sku = skuMatch ? skuMatch[1] : "";
+
+        // 🔹 If price says "Tap for price", click and reveal inline
+        if (!price || price.toLowerCase().includes("tap for price")) {
+          const tapBtn = await item.$('button[aria-label="Tap for Price"]');
+          if (tapBtn) {
+            await tapBtn.click();
+            await item.waitForSelector("#medium-customer-price", {
+              timeout: 5000,
+            });
+            price = await item
+              .$eval(
+                "#medium-customer-price",
+                (el) => el.textContent?.trim().replace("$", "") || ""
+              )
+              .catch(() => price);
+          }
+        }
+
+        products.push({
+          item_name: name,
+          price,
+          merchant_supplied_id: sku,
+          image_url: img,
+          brand,
+          category: itemCategory,
+        });
+      } catch (err) {
+        console.warn("⚠️ Skipped item due to error:", err);
+      }
+    }
+
+    console.log({ products: products.length });
+    const nextBtn = await page.$(`a[aria-label='Next page']`);
+    if (nextBtn && (await nextBtn.evaluate((btn) => !btn.disabled))) {
+      await nextBtn.click();
+      await waitForTimeout(3500);
+      pageCount++;
+      if (pageCount === 2) {
+        return;
+      }
+    } else {
+      break;
+    }
+  }
+
+  const outPath = path.join("output", `bestbuy_${storeKey}.csv`);
+
+  await writeCsv(products, outPath);
+  await validateMatches(outPath, "data/sample_sku_list.csv");
+
+  await page.screenshot({ path: `screenshots/${storeKey}_store_set.png` });
+  await browser.close();
+
+  console.log(`✅ Scraped ${products.length} in-stock items for ${storeKey}`);
+}
+
+ 
