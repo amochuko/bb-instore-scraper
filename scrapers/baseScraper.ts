@@ -208,7 +208,8 @@ async function searchForStoreLocation(
 
   await waitForTimeout(5000);
   await pickFirstStoreFromList(page, searchQuery);
-  await traverseForData(page, website, itemCategory, storeKey, browser);
+  // await traverseForData(page, website, itemCategory, storeKey, browser);
+  await scrapeAllPages(page, itemCategory, website, storeKey, browser);
 }
 
 async function savePageForDebug(page: Page, label: string) {
@@ -252,7 +253,7 @@ async function pickFirstStoreFromList(page: Page, searchQuery: string) {
   console.log(`Store set to ${searchQuery}`);
 }
 
-export async function traverseForData(
+async function traverseForDataOld(
   page: Page,
   website: string,
   itemCategory: string,
@@ -273,11 +274,108 @@ export async function traverseForData(
   const products: Product[] = [];
   let pageCount = 0;
 
+  // while (products.length < 10000 && pageCount < 30) {
+  //   console.log(`📄 Scraping page ${pageCount + 1}`);
+
+  //   const items = await page.$$(
+  //     "li.product-list-item.product-list-item-gridView"
+  //   );
+
+  //   for (const item of items) {
+  //     try {
+  //       const availability = await item
+  //         .$eval(".fulfillment p", (el) => el.textContent?.trim() || "")
+  //         .catch(() => "");
+
+  //       if (!availability.toLowerCase().includes("pick up")) continue;
+
+  //       const name = await item
+  //         .$eval(
+  //           ".sku-block-content-title h2.product-title",
+  //           (el) => el.textContent?.trim() || ""
+  //         )
+  //         .catch(() => "");
+
+  //       let price = await item
+  //         .$eval(
+  //           '[data-testid="price-presentational-testId"] #restricted-price',
+  //           (el) => el.textContent?.trim().replace("$", "") || ""
+  //         )
+  //         .catch(() => "");
+
+  //       const link = await item
+  //         .$eval(
+  //           ".sku-block-content-title a.product-list-item-link",
+  //           (el) => el.getAttribute("href") || ""
+  //         )
+  //         .catch(() => "");
+
+  //       const img = await item
+  //         .$eval(
+  //           'img[data-testid="product-image"]',
+  //           (el) => el.getAttribute("src") || ""
+  //         )
+  //         .catch(() => "");
+
+  //       const brand = await item
+  //         .$eval(
+  //           ".sku-block-content-title span.first-title",
+  //           (el) => el.textContent?.trim() || ""
+  //         )
+  //         .catch(() => "");
+
+  //       const skuMatch = link.match(/skuId=(\d+)/);
+  //       const sku = skuMatch ? skuMatch[1] : "";
+
+  //       // 🔹 If price says "Tap for price", click and reveal inline
+  //       if (!price || price.toLowerCase().includes("tap for price")) {
+  //         const tapBtn = await item.$('button[aria-label="Tap for Price"]');
+  //         if (tapBtn) {
+  //           await tapBtn.click();
+  //           await item.waitForSelector("#medium-customer-price", {
+  //             timeout: 5000,
+  //           });
+  //           price = await item
+  //             .$eval(
+  //               "#medium-customer-price",
+  //               (el) => el.textContent?.trim().replace("$", "") || ""
+  //             )
+  //             .catch(() => price);
+  //         }
+  //       }
+
+  //       products.push({
+  //         item_name: name,
+  //         price,
+  //         merchant_supplied_id: sku,
+  //         image_url: img,
+  //         brand,
+  //         category: itemCategory,
+  //       });
+  //     } catch (err) {
+  //       console.warn("⚠️ Skipped item due to error:", err);
+  //     }
+  //   }
+
+  //   const nextBtn = await page.$(`a[aria-label='Next page']`);
+  //   if (nextBtn && (await nextBtn.evaluate((btn) => !btn.disabled))) {
+  //     await nextBtn.click();
+  //     await waitForTimeout(3500);
+  //     pageCount++;
+  //     if (pageCount === 2) {
+  //       return;
+  //     }
+  //   } else {
+  //     break;
+  //   }
+  // }
+
   while (products.length < 10000 && pageCount < 30) {
     console.log(`📄 Scraping page ${pageCount + 1}`);
 
+    // ✅ Select all product list items anywhere inside <main>, no matter how deep
     const items = await page.$$(
-      "li.product-list-item.product-list-item-gridView"
+      "main li.product-list-item.product-list-item-gridView"
     );
 
     for (const item of items) {
@@ -326,7 +424,7 @@ export async function traverseForData(
         const skuMatch = link.match(/skuId=(\d+)/);
         const sku = skuMatch ? skuMatch[1] : "";
 
-        // 🔹 If price says "Tap for price", click and reveal inline
+        // 🔹 Handle "Tap for Price"
         if (!price || price.toLowerCase().includes("tap for price")) {
           const tapBtn = await item.$('button[aria-label="Tap for Price"]');
           if (tapBtn) {
@@ -356,15 +454,12 @@ export async function traverseForData(
       }
     }
 
-    console.log({ products: products.length });
+    // ✅ Handle pagination with <a>
     const nextBtn = await page.$(`a[aria-label='Next page']`);
     if (nextBtn && (await nextBtn.evaluate((btn) => !btn.disabled))) {
       await nextBtn.click();
       await waitForTimeout(3500);
       pageCount++;
-      if (pageCount === 2) {
-        return;
-      }
     } else {
       break;
     }
@@ -377,8 +472,180 @@ export async function traverseForData(
 
   await page.screenshot({ path: `screenshots/${storeKey}_store_set.png` });
   await browser.close();
-
+  if (pageCount === 5) {
+    return;
+  }
   console.log(`✅ Scraped ${products.length} in-stock items for ${storeKey}`);
 }
 
- 
+async function traverseForData(
+  page: Page,
+  itemCategory: string
+): Promise<Product[]> {
+  await page.waitForSelector(
+    "main li.product-list-item.product-list-item-gridView",
+    { timeout: 15000 }
+  );
+
+  const products: Product[] = [];
+
+  // ✅ Get every product <li> inside <main>, regardless of wrappers
+  const items = await page.$$(
+    "main li.product-list-item.product-list-item-gridView"
+  );
+
+  for (const item of items) {
+    try {
+      const availability = await item
+        .$eval(".fulfillment p", (el) => el.textContent?.trim() || "")
+        .catch(() => "");
+      if (!availability.toLowerCase().includes("pick up")) continue;
+
+      const name = await item
+        .$eval(
+          ".sku-block-content-title h2.product-title",
+          (el) => el.textContent?.trim() || ""
+        )
+        .catch(() => "");
+
+      let price = await item
+        .$eval(
+          '[data-testid="price-presentational-testId"] #restricted-price',
+          (el) => el.textContent?.trim().replace("$", "") || ""
+        )
+        .catch(() => "");
+
+      const link = await item
+        .$eval(
+          ".sku-block-content-title a.product-list-item-link",
+          (el) => el.getAttribute("href") || ""
+        )
+        .catch(() => "");
+
+      const img = await item
+        .$eval(
+          'img[data-testid="product-image"]',
+          (el) => el.getAttribute("src") || ""
+        )
+        .catch(() => "");
+
+      const brand = await item
+        .$eval(
+          ".sku-block-content-title span.first-title",
+          (el) => el.textContent?.trim() || ""
+        )
+        .catch(() => "");
+
+      const skuMatch = link.match(/skuId=(\d+)/);
+      const sku = skuMatch ? skuMatch[1] : "";
+
+      // 🔹 Handle "Tap for Price"
+      if (!price || price.toLowerCase().includes("tap for price")) {
+        const tapBtn = await item.$('button[aria-label="Tap for Price"]');
+        if (tapBtn) {
+          await tapBtn.click();
+          await item.waitForSelector("#medium-customer-price", {
+            timeout: 5000,
+          });
+          price = await item
+            .$eval(
+              "#medium-customer-price",
+              (el) => el.textContent?.trim().replace("$", "") || ""
+            )
+            .catch(() => price);
+        }
+      }
+
+      products.push({
+        item_name: name,
+        price,
+        merchant_supplied_id: sku,
+        image_url: img,
+        brand,
+        category: itemCategory,
+      });
+    } catch (err) {
+      console.warn("⚠️ Skipped item due to error:", err);
+    }
+  }
+
+  return products;
+}
+
+async function safeGoto(page: Page, url: string, options = {}) {
+  if (!url || typeof url !== "string") {
+    throw new Error(`❌ Invalid URL provided to safeGoto: ${url}`);
+  }
+
+  // If it's a relative URL, prepend BestBuy base
+  if (!/^https?:\/\//i.test(url)) {
+    console.warn(`⚠️ Relative URL detected, prepending base: ${url}`);
+    url = `https://www.bestbuy.com${url}`;
+  }
+
+  console.log(`🌐 Navigating to: ${url}`);
+
+  try {
+    await page.goto(url, {
+      waitUntil: "networkidle0",
+      timeout: 30000,
+      ...options,
+    });
+  } catch (err) {
+    console.error(`🚨 Navigation failed for ${url}:`, err.message);
+    throw err;
+  }
+}
+
+async function scrapeAllPages(
+  page: Page,
+  itemCategory: string,
+  website: string,
+  storeKey: string,
+  browser: Browser
+) {
+  const searchQuery = `${website}/site/searchpage.jsp?st=${encodeURIComponent(
+    itemCategory
+  )}`;
+
+  console.log(`🔎 Searching category: ${itemCategory} via ${searchQuery}`);
+  await safeGoto(page, searchQuery, { waitUntil: "domcontentloaded" });
+
+  const allProducts: Product[] = [];
+  let currentPage = 1;
+  const maxPages = 2; // limit for testing
+
+  while (true) {
+    console.log(`📄 Scraping page ${currentPage}...`);
+    const productsOnPage = await traverseForData(page, itemCategory);
+    allProducts.push(...productsOnPage);
+
+    if (currentPage >= maxPages) {
+      console.log("Reached test page limit.");
+      break;
+    }
+
+    const nextPageButton = await page.$(`a[aria-label='Next page']`);
+    if (!nextPageButton) {
+      console.log("No more pages.");
+      break;
+    }
+
+    await Promise.all([
+      page.waitForNavigation({ waitUntil: "networkidle0" }),
+      nextPageButton.click(),
+    ]);
+
+    currentPage++;
+  }
+
+  const outPath = path.join("output", `bestbuy_${storeKey}.csv`);
+  await writeCsv(allProducts, outPath);
+  await validateMatches(outPath, "data/sample_sku_list.csv");
+  await page.screenshot({ path: `screenshots/${storeKey}_store_set.png` });
+  await browser.close();
+
+  console.log(
+    `✅ Scraped ${allProducts.length} in-stock items for ${storeKey}`
+  );
+}
