@@ -33,10 +33,13 @@ puppeteer.use(StealthPlugin());
 const waitForTimeout = (secs: number) =>
   new Promise((res) => setTimeout(res, secs));
 
+let maxPages = 0;
+
 export async function scrapeStore(
   website: string,
   storeKey: string,
-  itemCategory: string
+  itemCategory: string,
+  numOfPages: number
 ) {
   const browser = await puppeteer.launch({
     headless: process.env.NODE_END === "production",
@@ -48,6 +51,8 @@ export async function scrapeStore(
     ],
   });
   const page = await browser.newPage();
+  maxPages = numOfPages;
+  console.log("maxPages: ", maxPages);
 
   const store = stores[storeKey as keyof typeof stores];
   console.log(`Navigating to BestBuy for store: ${storeKey}`);
@@ -189,7 +194,7 @@ async function searchForStoreLocation(
       console.log(`Search results loaded for ${option}`);
       break; // Found results, exit loop
     } catch {
-      console.warn(`⚠️ No results for "${option}", trying next...`);
+      console.warn(`No results for "${option}", trying next...`);
 
       await savePageForDebug(page, "debug-page");
       await takeScreenshot(page, "debug-screenshot");
@@ -240,12 +245,14 @@ async function waitForSelectorWithRetry(
 
 async function pickFirstStoreFromList(page: Page, searchQuery: string) {
   // Wait for the first store card (highlighted one)
-  await page.waitForSelector("li.store.store-selected", { timeout: 15000 });
+  // await page.waitForSelector("li.store.store-selected", { timeout: 15000 });
+  await waitForSelectorWithRetry(page, "li.store.store-selected", 4, 15000);
 
   //5. Click on "Make This Your Store"
   const makeThisYourStoreSelector =
     "li.store.store-selected .make-this-your-store";
-  await page.waitForSelector(makeThisYourStoreSelector, { timeout: 10000 });
+  // await page.waitForSelector(makeThisYourStoreSelector, { timeout: 10000 });
+  await waitForSelectorWithRetry(page, makeThisYourStoreSelector, 5, 1000);
 
   await page.click(makeThisYourStoreSelector);
 
@@ -253,11 +260,9 @@ async function pickFirstStoreFromList(page: Page, searchQuery: string) {
   console.log(`Store set to ${searchQuery}`);
 }
 
-
-
 async function autoScroll(page: Page) {
   await page.evaluate(async () => {
-    await new Promise((resolve) => {
+    await new Promise<void>((resolve) => {
       let totalHeight = 0;
       const distance = 300;
       const timer = setInterval(() => {
@@ -281,17 +286,7 @@ async function traverseForData(
   // Force scroll to load all items on the current page
   await autoScroll(page);
 
-  // await page.waitForSelector(
-  //   "main li.product-list-item.product-list-item-gridView",
-  //   { timeout: 15000 }
-  // );
-
   const products: Product[] = [];
-
-  //  Get every product <li> inside <main>, regardless of wrappers
-  // const items = await page.$$(
-  //   "main li.product-list-item.product-list-item-gridView"
-  // );
 
   // Get both normal and sponsored <li> items
   const items = await page.$$(
@@ -401,7 +396,10 @@ async function safeGoto(page: Page, url: string, options = {}) {
       ...options,
     });
   } catch (err) {
-    console.error(`Navigation failed for ${url}:`, err.message);
+    if (err instanceof Error) {
+      console.error(`Navigation failed for ${url}:`, err.message);
+    }
+    console.error(`Navigation failed for ${url}:`, err);
     throw err;
   }
 }
@@ -422,21 +420,23 @@ async function scrapeAllPages(
 
   const allProducts: Product[] = [];
   let currentPage = 1;
-  const maxPages = 2; // limit for testing
+  // const maxPages = 3; // limit for testing
 
   while (true) {
     console.log(`Scraping page ${currentPage}...`);
     const productsOnPage = await traverseForData(page, itemCategory);
     allProducts.push(...productsOnPage);
 
-    if (currentPage >= maxPages) {
-      console.log("Reached test page limit.");
+    // If --page=N was passed and we've reached it, stop
+    if (maxPages && currentPage >= maxPages) {
+      console.log(`Reached CLI page limit (${maxPages}).`);
       break;
     }
 
+    // Look for 'Next page' button
     const nextPageButton = await page.$(`a[aria-label='Next page']`);
     if (!nextPageButton) {
-      console.log("No more pages.");
+      console.log("No more pages found.");
       break;
     }
 
@@ -454,7 +454,5 @@ async function scrapeAllPages(
   await page.screenshot({ path: `screenshots/${storeKey}_store_set.png` });
   await browser.close();
 
-  console.log(
-    `Scraped ${allProducts.length} in-stock items for ${storeKey}`
-  );
+  console.log(`Scraped ${allProducts.length} in-stock items for ${storeKey}`);
 }
