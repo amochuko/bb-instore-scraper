@@ -35,7 +35,7 @@ const { store, category, page: numOfPages } = argv as any;
 
 if (numOfPages) {
   console.log(
-    `Scraping ${numOfPages} page${numOfPages > 1 ? "s" : ""}  only...`
+    `Scraping ${numOfPages} page${numOfPages > 1 ? "s" : ""} only...`
   );
 } else {
   console.log(`Scraping all pages...`);
