@@ -93,7 +93,6 @@ async function changeLocation(
   itemCategory: string,
   broswer: Browser
 ) {
-
   console.log("US region confirmed", page.url());
 
   await waitForTimeout(5000);
@@ -299,12 +298,39 @@ async function traverseForData(
         )
         .catch(() => "");
 
-      let price = await item
-        .$eval(
-          '[data-testid="price-presentational-testId"] #restricted-price',
-          (el) => el.textContent?.trim().replace("$", "") || ""
-        )
-        .catch(() => "");
+      let { currentPrice: price, originalPrice } = await item
+        .$eval('[data-testid="price-presentational-testId"]', (el) => {
+          const restricted = el.querySelector("#restricted-price");
+          const normal = el.querySelector("span, div");
+          let rawText = restricted?.textContent || normal?.textContent || "";
+          rawText = rawText.trim();
+
+          let currentPrice = "";
+          let originalPrice = "";
+
+          // Special case: Tap for price
+          if (/tap for price/i.test(rawText)) {
+            currentPrice = "Tap for price";
+            return { currentPrice, originalPrice: "" };
+          }
+
+          // Extract current price (first number before Save/Comp. Value)
+          const currentMatch = rawText.match(/\$?([\d,]+(\.\d{1,2})?)/);
+          if (currentMatch) {
+            currentPrice = currentMatch[1];
+          }
+
+          // Extract original price from "Comp. Value" if present
+          const originalMatch = rawText.match(
+            /Comp\. Value:?\s*\$?([\d,]+(\.\d{1,2})?)/i
+          );
+          if (originalMatch) {
+            originalPrice = originalMatch[1];
+          }
+
+          return { currentPrice, originalPrice };
+        })
+        .catch(() => ({ currentPrice: "", originalPrice: "" }));
 
       const link = await item
         .$eval(
