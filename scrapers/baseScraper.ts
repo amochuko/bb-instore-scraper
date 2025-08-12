@@ -52,7 +52,6 @@ export async function scrapeStore(
   });
   const page = await browser.newPage();
   maxPages = numOfPages;
-  console.log("maxPages: ", maxPages);
 
   const store = stores[storeKey as keyof typeof stores];
   console.log(`Navigating to BestBuy for store: ${storeKey}`);
@@ -94,18 +93,12 @@ async function changeLocation(
   itemCategory: string,
   broswer: Browser
 ) {
-  // await page.waitForNavigation({
-  //   waitUntil: "domcontentloaded",
-  // });
 
   console.log("US region confirmed", page.url());
 
   await waitForTimeout(5000);
   // After clicking the US link and navigation
   const locationTooltipSelector = 'button[data-cy*="location-tooltip"]';
-  // await page.waitForSelector('button[data-cy*="location-tooltip"]', {
-  //   timeout: 5000,
-  // });
   await waitForSelectorWithRetry(page, locationTooltipSelector, 5, 10000);
 
   const changeLocationBtn = 'button[data-cy="location-tooltip-lv-button"]';
@@ -127,8 +120,6 @@ async function changeLocation(
 
   await page.click(changeLocationBtn);
   console.log("Opened store location overlay");
-
-  // await takeScreenshot(page, `screenshots/${storeKey}_store_overlay`);
 
   // Click "Find Another Store"
   const findAnotherStore = "a.find-store-btn";
@@ -163,7 +154,6 @@ async function searchForStoreLocation(
   const locationInputSelector =
     'input[aria-label="Enter city and state or zip code"]';
 
-  // const locationInputSelector = 'input[data-cy="store-locator-search-input"]';
   await page.waitForSelector(locationInputSelector, { timeout: 10000 });
 
   // Priority: city → state → zip
@@ -213,7 +203,6 @@ async function searchForStoreLocation(
 
   await waitForTimeout(5000);
   await pickFirstStoreFromList(page, searchQuery);
-  // await traverseForData(page, website, itemCategory, storeKey, browser);
   await scrapeAllPages(page, itemCategory, website, storeKey, browser);
 }
 
@@ -237,7 +226,7 @@ async function waitForSelectorWithRetry(
   for (let i = 0; i < retries; i++) {
     const el = await page.$(selector);
     if (el) return el;
-    console.warn(`⏳ Retry ${i + 1}: Waiting for ${selector}`);
+    console.warn(`* Retry ${i + 1}: Waiting for ${selector}`);
     await waitForTimeout(delay);
   }
   return null;
@@ -245,18 +234,16 @@ async function waitForSelectorWithRetry(
 
 async function pickFirstStoreFromList(page: Page, searchQuery: string) {
   // Wait for the first store card (highlighted one)
-  // await page.waitForSelector("li.store.store-selected", { timeout: 15000 });
   await waitForSelectorWithRetry(page, "li.store.store-selected", 4, 15000);
 
   //5. Click on "Make This Your Store"
   const makeThisYourStoreSelector =
     "li.store.store-selected .make-this-your-store";
-  // await page.waitForSelector(makeThisYourStoreSelector, { timeout: 10000 });
   await waitForSelectorWithRetry(page, makeThisYourStoreSelector, 5, 1000);
 
   await page.click(makeThisYourStoreSelector);
 
-  takeScreenshot(page, "make-this-your-store");
+  // takeScreenshot(page, "make-this-your-store");
   console.log(`Store set to ${searchQuery}`);
 }
 
@@ -343,7 +330,7 @@ async function traverseForData(
       const skuMatch = link.match(/skuId=(\d+)/);
       const sku = skuMatch ? skuMatch[1] : "";
 
-      // 🔹 Handle "Tap for Price"
+      // Handle "Tap for Price"
       if (!price || price.toLowerCase().includes("tap for price")) {
         const tapBtn = await item.$('button[aria-label="Tap for Price"]');
         if (tapBtn) {
@@ -420,7 +407,6 @@ async function scrapeAllPages(
 
   const allProducts: Product[] = [];
   let currentPage = 1;
-  // const maxPages = 3; // limit for testing
 
   while (true) {
     console.log(`Scraping page ${currentPage}...`);
