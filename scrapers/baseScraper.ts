@@ -3,7 +3,7 @@ import puppeteer from "puppeteer-extra";
 import StealthPlugin from "puppeteer-extra-plugin-stealth";
 
 import path from "node:path";
-import { Browser, Page } from "puppeteer";
+import { Browser, ElementHandle, Page } from "puppeteer";
 import stores from "../config/store.json";
 import { writeCsv } from "../utils/logger";
 import { validateMatches } from "../utils/matchVallidator";
@@ -93,7 +93,6 @@ async function changeLocation(
   itemCategory: string,
   broswer: Browser
 ) {
-
   console.log("US region confirmed", page.url());
 
   await waitForTimeout(5000);
@@ -299,13 +298,8 @@ async function traverseForData(
         )
         .catch(() => "");
 
-      let price = await item
-        .$eval(
-          '[data-testid="price-presentational-testId"] #restricted-price',
-          (el) => el.textContent?.trim().replace("$", "") || ""
-        )
-        .catch(() => "");
-
+      let { price } = await extraPrice(item);
+   
       const link = await item
         .$eval(
           ".sku-block-content-title a.product-list-item-link",
@@ -330,23 +324,6 @@ async function traverseForData(
       const skuMatch = link.match(/skuId=(\d+)/);
       const sku = skuMatch ? skuMatch[1] : "";
 
-      // Handle "Tap for Price"
-      if (!price || price.toLowerCase().includes("tap for price")) {
-        const tapBtn = await item.$('button[aria-label="Tap for Price"]');
-        if (tapBtn) {
-          await tapBtn.click();
-          await item.waitForSelector("#medium-customer-price", {
-            timeout: 5000,
-          });
-          price = await item
-            .$eval(
-              "#medium-customer-price",
-              (el) => el.textContent?.trim().replace("$", "") || ""
-            )
-            .catch(() => price);
-        }
-      }
-
       products.push({
         item_name: name,
         price,
@@ -361,6 +338,41 @@ async function traverseForData(
   }
 
   return products;
+}
+
+async function extraPrice(item: ElementHandle<HTMLLIElement>) {
+  // Step 1: Always grab raw text first
+  let rawPriceText = await item
+    .$eval(
+      '[data-testid="price-presentational-testId"]',
+      (el) => el.textContent?.trim() || ""
+    )
+    .catch(() => "");
+
+  // Step 2: If it’s restricted (“Tap for price”), click button and reveal actual price
+  if (/tap for price/i.test(rawPriceText)) {
+    const tapBtn = await item.$(
+      'button[aria-label="Tap for Price"], #restricted-price'
+    );
+    if (tapBtn) {
+      await tapBtn.click();
+      await item.waitForSelector("#medium-customer-price", { timeout: 5000 });
+      rawPriceText = await item
+        .$eval("#medium-customer-price", (el) => el.textContent?.trim() || "")
+        .catch(() => rawPriceText);
+    }
+  }
+
+  // Step 3: Extract numeric value (but still keep “Tap for price” if it’s still there)
+  let price = "";
+  if (/tap for price/i.test(rawPriceText)) {
+    price = "Tap for price";
+  } else {
+    const match = rawPriceText.replace(/[$,]/g, "").match(/[\d.]+/);
+    price = match ? match[0] : "";
+  }
+
+  return { price };
 }
 
 async function safeGoto(page: Page, url: string, options = {}) {
